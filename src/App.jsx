@@ -57,11 +57,35 @@ function getCurrentRoute() {
   return "home";
 }
 
+function normalizeAccountType(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["student", "teen", "student_user", "teen_user", "youth"].includes(normalized)) return "student";
+  if (["employer", "business", "business_user", "company", "company_user"].includes(normalized)) return "employer";
+  return normalized;
+}
+
 function resolveAccountType(user) {
   if (!user) return "guest";
-  if (user.user_metadata?.account_type) return user.user_metadata.account_type;
-  if (user.app_metadata?.account_type) return user.app_metadata.account_type;
-  if (user.user_metadata?.role) return user.user_metadata.role;
+  const metadataSources = [user.user_metadata, user.app_metadata];
+
+  for (const metadata of metadataSources) {
+    if (!metadata || typeof metadata !== "object") continue;
+    const candidates = [
+      metadata.account_type,
+      metadata.accountType,
+      metadata.role,
+      metadata.userType,
+      metadata.accounttype,
+      metadata.type,
+    ];
+    for (const candidate of candidates) {
+      const normalized = normalizeAccountType(candidate);
+      if (normalized) return normalized;
+    }
+  }
+
   return "guest";
 }
 
@@ -371,6 +395,16 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const nextUser = session?.user ?? null;
       if (!active) return;
+
+      if (import.meta.env.DEV) {
+        console.info("[auth] onAuthStateChange", {
+          event,
+          userId: nextUser?.id ?? null,
+          accountType: resolveAccountType(nextUser),
+          hasSession: Boolean(session),
+        });
+      }
+
       setAuthUser(nextUser);
       setAuthReady(true);
 
@@ -381,16 +415,22 @@ function App() {
         return;
       }
 
-      if (event === "SIGNED_IN") {
-        setNeedsEmailConfirmation(false);
+      if ((event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") && nextUser) {
         const targetRoute = getRouteForUser(nextUser);
+        const accountType = resolveAccountType(nextUser);
+        if (import.meta.env.DEV) {
+          console.info("[auth] session confirmed", { event, accountType, targetRoute, userId: nextUser.id });
+        }
+        setNeedsEmailConfirmation(false);
         setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting to your dashboard…" });
         setSignInNotice(true);
         window.clearTimeout(signInNoticeTimerRef.current);
         signInNoticeTimerRef.current = window.setTimeout(() => setSignInNotice(false), 4500);
         window.clearTimeout(authMessageTimerRef.current);
         authMessageTimerRef.current = window.setTimeout(() => setAuthFeedback(null), 4000);
-        navigate(targetRoute, { replace: true });
+        if (targetRoute !== "home") {
+          navigate(targetRoute, { replace: true });
+        }
       }
     });
 
@@ -399,18 +439,29 @@ function App() {
       const nextUser = data?.session?.user ?? null;
       setAuthUser(nextUser);
       setAuthReady(true);
+
       if (error) {
+        if (import.meta.env.DEV) {
+          console.error("[auth] getSession error", { message: error.message, code: error.code, status: error.status });
+        }
         setAuthFeedback({ type: "error", text: error.message || "We couldn't check your session." });
       }
+
       if (nextUser) {
         const targetRoute = getRouteForUser(nextUser);
+        if (import.meta.env.DEV) {
+          console.info("[auth] existing session restored", { accountType: resolveAccountType(nextUser), targetRoute, userId: nextUser.id });
+        }
         if (route === "home" || route === "signin" || route === "signup") {
           navigate(targetRoute, { replace: true });
         }
       }
-    }).catch(() => {
+    }).catch((error) => {
       if (!active) return;
       setAuthReady(true);
+      if (import.meta.env.DEV) {
+        console.error("[auth] getSession failed", { message: error?.message, code: error?.code, status: error?.status });
+      }
       setAuthFeedback({ type: "error", text: "We couldn't check your sign-in status. Please try again." });
     });
 
@@ -462,7 +513,15 @@ function App() {
           email: email.trim(),
           password,
         });
+
         if (error) {
+          if (import.meta.env.DEV) {
+            console.error("[auth] signInWithPassword failed", {
+              code: error?.code,
+              status: error?.status,
+              message: error?.message,
+            });
+          }
           if (error.code === "email_not_confirmed" || error.message?.toLowerCase().includes("email not confirmed")) {
             setNeedsEmailConfirmation(true);
             setAuthFeedback({ type: "error", text: "Please confirm your email address before signing in." });
@@ -471,13 +530,32 @@ function App() {
           throw error;
         }
 
-        const signedInUser = data?.user ?? null;
-        setPassword("");
-        setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting…" });
-        if (signedInUser) {
-          const target = getRouteForUser(signedInUser);
-          navigate(target, { replace: true });
+        const nextSession = data?.session ?? null;
+        const signedInUser = data?.user ?? nextSession?.user ?? null;
+
+        if (!nextSession || !signedInUser) {
+          if (import.meta.env.DEV) {
+            console.error("[auth] signInWithPassword returned no valid session", {
+              hasSession: Boolean(nextSession),
+              hasUser: Boolean(signedInUser),
+            });
+          }
+          throw new Error("Authentication did not complete. Please try again.");
         }
+
+        setAuthUser(signedInUser);
+        setAuthReady(true);
+        setPassword("");
+        const target = getRouteForUser(signedInUser);
+        if (import.meta.env.DEV) {
+          console.info("[auth] signInWithPassword successful", {
+            userId: signedInUser.id,
+            accountType: resolveAccountType(signedInUser),
+            targetRoute: target,
+          });
+        }
+        setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting…" });
+        navigate(target, { replace: true });
       }
     } catch (error) {
       setAuthFeedback({ type: "error", text: getAuthErrorMessage(error) });
