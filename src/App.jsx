@@ -40,6 +40,23 @@ const jobs = [
 
 const quickFilters = ["All Jobs", "Remote Jobs", "Retail", "Food Service", "Tutoring", "Tech"];
 const milestones = ["First Dollar", "$50 Club", "Century I", "Half Grand", "Grand Achiever", "First Gig"];
+const skillSprintChallenges = [
+  {
+    prompt: "A strong first job skill for customer-facing work is:",
+    options: ["Customer service", "Advanced robotics", "Coastal navigation", "Deep sea diving"],
+    answer: "Customer service",
+  },
+  {
+    prompt: "What helps you stand out during a first interview?",
+    options: ["Showing up prepared and friendly", "Pretending to know everything", "Leaving before the interview starts", "Refusing to talk"],
+    answer: "Showing up prepared and friendly",
+  },
+  {
+    prompt: "Which habit best supports a teen building experience?",
+    options: ["Showing up consistently", "Skipping every shift", "Avoiding all feedback", "Never asking questions"],
+    answer: "Showing up consistently",
+  },
+];
 
 function getAuthErrorMessage(error) {
   const message = error?.message?.toLowerCase() ?? "";
@@ -75,6 +92,9 @@ function App() {
   const [authFeedback, setAuthFeedback] = useState(null);
   const [signInNotice, setSignInNotice] = useState(false);
   const [needsEmailConfirmation, setNeedsEmailConfirmation] = useState(false);
+  const [skillSprintIndex, setSkillSprintIndex] = useState(0);
+  const [skillSprintScore, setSkillSprintScore] = useState(0);
+  const [skillSprintMessage, setSkillSprintMessage] = useState("Pick the best answer to unlock your next win.");
   const [activePage, setActivePage] = useState(() => {
     const hash = window.location.hash;
     if (hash === "#business") return "business";
@@ -264,6 +284,9 @@ function App() {
     || authUser?.user_metadata?.full_name?.trim().split(/\s+/)[0]
     || "there";
 
+  const activeSkillChallenge = skillSprintChallenges[skillSprintIndex];
+  const skillSprintComplete = skillSprintIndex >= skillSprintChallenges.length;
+
   function selectQuickFilter(filter) {
     setQuickFilter(filter);
     setCategoryFilter(filter === "All Jobs" || filter === "Remote Jobs" ? "All Categories" : filter);
@@ -280,10 +303,39 @@ function App() {
     setActionMessage("Hustle posting is not connected yet. No listing was submitted.");
   }
 
+  function handleSkillSprintAnswer(option) {
+    if (skillSprintComplete) return;
+
+    const correct = option === activeSkillChallenge.answer;
+    if (correct) {
+      setSkillSprintScore((current) => current + 1);
+      setSkillSprintMessage("Nice move! That answer fits a teen career win.");
+    } else {
+      setSkillSprintMessage(`Close! The best answer is “${activeSkillChallenge.answer}.”`);
+    }
+
+    const nextIndex = skillSprintIndex + 1;
+    if (nextIndex >= skillSprintChallenges.length) {
+      setSkillSprintIndex(nextIndex);
+      return;
+    }
+
+    window.setTimeout(() => {
+      setSkillSprintIndex(nextIndex);
+      setSkillSprintMessage("Pick the best answer to unlock your next win.");
+    }, 900);
+  }
+
+  function resetSkillSprint() {
+    setSkillSprintIndex(0);
+    setSkillSprintScore(0);
+    setSkillSprintMessage("Pick the best answer to unlock your next win.");
+  }
+
   return (
     <div className="app">
       <div className="announcement">
-        Your future starts here. Find opportunities built for you.
+        teenflow.org: your future starts here. Find opportunities built for you.
       </div>
 
       <header className="navbar">
@@ -384,7 +436,7 @@ function App() {
             <div className="eyebrow"><span className="live-dot" /> BUILT FOR THE NEXT GENERATION</div>
             <h1>Your future<br />is <span className="gradient-text">in motion.</span></h1>
             <p className="hero-description">
-              Made for 16–19-year-olds looking for flexible work, real experience, and a first step on their own terms.
+              teenflow.org helps 16–19-year-olds discover flexible work, real experience, and a first step on their own terms.
             </p>
 
             <div className="hero-actions">
@@ -448,6 +500,37 @@ function App() {
         </section>
 
         <StudentResumeAssistant user={authUser} onRequestSignIn={() => openAuthDialog("sign-in", "student")} />
+
+        <section className="skill-sprint-section">
+          <div className="eyebrow">TEENFLOW QUEST</div>
+          <h2>Quick wins. <span className="gradient-text">Big confidence.</span></h2>
+          <div className="skill-sprint-card">
+            <div className="skill-sprint-header">
+              <span className="skill-sprint-score">Score: {skillSprintScore}</span>
+              <span className="skill-sprint-progress">{Math.min(skillSprintIndex + (skillSprintComplete ? 1 : 0), skillSprintChallenges.length)}/{skillSprintChallenges.length}</span>
+            </div>
+
+            {skillSprintComplete ? (
+              <>
+                <h3>Challenge complete!</h3>
+                <p>You finished with {skillSprintScore} out of {skillSprintChallenges.length} correct answers.</p>
+                <button type="button" className="primary-button" onClick={resetSkillSprint}>Play again</button>
+              </>
+            ) : (
+              <>
+                <h3>{activeSkillChallenge.prompt}</h3>
+                <div className="skill-sprint-options">
+                  {activeSkillChallenge.options.map((option) => (
+                    <button key={option} type="button" className="skill-sprint-option" onClick={() => handleSkillSprintAnswer(option)}>
+                      {option}
+                    </button>
+                  ))}
+                </div>
+                <p className="skill-sprint-message">{skillSprintMessage}</p>
+              </>
+            )}
+          </div>
+        </section>
 
         <section className="jobs-section" id="student-jobs">
           <div className="job-page-heading">
@@ -661,14 +744,14 @@ function App() {
           <div className="employer-art"><div className="art-circle"><span>TF</span></div><div className="art-label label-one">Local opportunity</div><div className="art-label label-two">Future talent ✳</div><div className="art-star">✳</div></div>
         </section>
 
-        <section className="final-cta"><span className="cta-sparkle">✳</span><div className="eyebrow">YOUR STORY IS JUST BEGINNING</div><h2>There's more out there.<br /><span className="gradient-text">Let's find it.</span></h2><a href="#student" className="primary-button">Explore TeenFlow ↗</a></section>
+        <section className="final-cta"><span className="cta-sparkle">✳</span><div className="eyebrow">YOUR STORY IS JUST BEGINNING</div><h2>There's more out there.<br /><span className="gradient-text">Let's find it.</span></h2><a href="#student" className="primary-button">Explore teenflow.org ↗</a></section>
           </>
         )}
           </>
         )}
       </main>
 
-      {activePage !== "business" && <footer><a className="brand footer-brand" href="#home"><span className="brand-mark"><i /><i /><i /><i /><i /><i /><i /></span><span>Teen<span className="brand-flow">Flow</span></span></a><p>Opening doors. Building futures.</p><span className="footer-copy">© 2026 TeenFlow. Built for what's next.</span></footer>}
+      {activePage !== "business" && <footer><a className="brand footer-brand" href="#home"><span className="brand-mark"><i /><i /><i /><i /><i /><i /><i /></span><span>Teen<span className="brand-flow">Flow</span></span></a><p>Opening doors. Building futures.</p><span className="footer-copy">© 2026 teenflow.org. Built for what's next.</span></footer>}
 
       <dialog
         className="auth-dialog"

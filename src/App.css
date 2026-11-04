@@ -133,6 +133,16 @@ h1 { font-size: clamp(50px,6.1vw,78px); line-height: 1.07; letter-spacing: -5px;
 .how-section { text-align: center; border-top: 1px solid var(--line); }
 .how-section > .eyebrow { justify-content: center; }
 .how-section h2 { margin-bottom: 47px; }
+.skill-sprint-section { max-width: 1134px; margin: 0 auto; padding: 0 28px 90px; }
+.skill-sprint-section > .eyebrow { justify-content: center; }
+.skill-sprint-section h2 { text-align: center; font-size: clamp(34px,4vw,47px); line-height: 1.2; letter-spacing: -2px; margin: 15px 0 28px; }
+.skill-sprint-card { border: 1px solid #ffffff12; border-radius: 24px; background: linear-gradient(135deg, rgba(127,102,255,0.14), rgba(41,207,196,0.08)); padding: 28px; box-shadow: 0 24px 58px rgba(20,16,38,0.35); }
+.skill-sprint-header { display: flex; justify-content: space-between; gap: 16px; color: #c7d0f8; font-size: 11px; letter-spacing: 1.3px; text-transform: uppercase; }
+.skill-sprint-card h3 { margin: 18px 0 18px; font-size: clamp(22px,2vw,30px); line-height: 1.35; }
+.skill-sprint-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.skill-sprint-option { background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 16px 18px; font-size: 13px; text-align: left; transition: transform 0.2s ease, border-color 0.2s ease; }
+.skill-sprint-option:hover { transform: translateY(-1px); border-color: rgba(138, 122, 255, 0.9); }
+.skill-sprint-message { margin-top: 18px; color: var(--muted); font-size: 12px; line-height: 1.8; }
 .steps-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; text-align: left; }
 .steps-grid article { position: relative; padding: 25px; border: 1px solid #ffffff13; border-radius: 13px; background: #ffffff04; }
 .step-number { position: absolute; right: 22px; top: 24px; color: #656f8c; font-size: 10px; }
