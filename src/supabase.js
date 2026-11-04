@@ -3,6 +3,29 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const supabaseProjectHost = supabaseUrl ? new URL(supabaseUrl).hostname : "missing";
+
+const getSafeStorage = () => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const storage = window.localStorage;
+    const testKey = "teenflow-storage-test";
+    storage.setItem(testKey, "1");
+    storage.removeItem(testKey);
+    return storage;
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("[supabase] localStorage unavailable or blocked", {
+        message: error?.message ?? null,
+        host: window.location.hostname,
+      });
+    }
+    return undefined;
+  }
+};
 
 const createDemoSupabaseClient = () => {
   const emptyResult = (data = null) => ({ data, error: null });
@@ -49,6 +72,26 @@ const createDemoSupabaseClient = () => {
   };
 };
 
+const storage = getSafeStorage();
+
 export const supabase = supabaseUrl && supabasePublishableKey
-  ? createClient(supabaseUrl, supabasePublishableKey)
+  ? createClient(supabaseUrl, supabasePublishableKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
+        storage,
+      },
+    })
   : createDemoSupabaseClient();
+
+if (import.meta.env.DEV) {
+  console.info("[supabase] initialized", {
+    host: supabaseProjectHost,
+    isLocal: window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1",
+    origin: window.location.origin,
+    storageAvailable: Boolean(storage),
+    persistSession: true,
+    autoRefreshToken: true,
+  });
+}

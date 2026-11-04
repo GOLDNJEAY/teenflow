@@ -610,11 +610,16 @@ function App() {
 
         if (import.meta.env.DEV) {
           console.info("[auth] signInWithPassword response", {
+            hasData: Boolean(data),
             hasSession: Boolean(data?.session),
             hasUser: Boolean(data?.user),
-            code: error?.code ?? null,
-            status: error?.status ?? null,
-            message: error?.message ?? null,
+            hasSessionAccessToken: Boolean(data?.session?.access_token),
+            hasError: Boolean(error),
+            errorCode: error?.code ?? null,
+            errorStatus: error?.status ?? null,
+            errorMessage: error?.message ?? null,
+            projectHost: new URL(import.meta.env.VITE_SUPABASE_URL).hostname,
+            environment: import.meta.env.PROD ? "production" : "local",
           });
         }
 
@@ -644,9 +649,16 @@ function App() {
               hasUser: Boolean(signedInUser),
               userId: signedInUser?.id ?? null,
               message: data?.message ?? null,
+              errorCode: error?.code ?? null,
+              errorStatus: error?.status ?? null,
+              errorMessage: error?.message ?? null,
             });
           }
-          throw new Error(getAuthErrorMessage({ message: "Sign in did not return a valid session." }));
+          throw new Error(getAuthErrorMessage({
+            code: error?.code ?? "no_session",
+            status: error?.status ?? null,
+            message: error?.message ?? "Sign in did not return a valid session.",
+          }));
         }
 
         const accountType = resolveAccountType(signedInUser);
