@@ -75,10 +75,16 @@ function resolveAccountType(user) {
     const candidates = [
       metadata.account_type,
       metadata.accountType,
+      metadata.account_role,
+      metadata.accountRole,
       metadata.role,
+      metadata.userType,
+      metadata.user_type,
       metadata.userType,
       metadata.accounttype,
       metadata.type,
+      metadata.profile_type,
+      metadata.profileType,
     ];
     for (const candidate of candidates) {
       const normalized = normalizeAccountType(candidate);
@@ -89,8 +95,8 @@ function resolveAccountType(user) {
   return "guest";
 }
 
-function getRouteForUser(user) {
-  const type = resolveAccountType(user);
+function getRouteForUser(user, roleOverride = null) {
+  const type = roleOverride || resolveAccountType(user);
   if (type === "employer") return "business";
   if (type === "student") return "teen";
   return "home";
@@ -360,6 +366,11 @@ function App() {
 
   const authMessageTimerRef = useRef(null);
   const signInNoticeTimerRef = useRef(null);
+  const routeRef = useRef(route);
+
+  useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
 
   const isTeenAccount = resolveAccountType(authUser) === "student";
   const isBusinessAccount = resolveAccountType(authUser) === "employer";
@@ -391,36 +402,78 @@ function App() {
   }, []);
 
   useEffect(() => {
-    let active = true;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    let isActive = true;
+
+    const applyAuthState = (session, source = "session") => {
       const nextUser = session?.user ?? null;
-      if (!active) return;
+      const hasValidSession = Boolean(session) && Boolean(nextUser);
+
+      if (!isActive) return;
 
       if (import.meta.env.DEV) {
-        console.info("[auth] onAuthStateChange", {
-          event,
+        console.info("[auth] auth state update", {
+          source,
           userId: nextUser?.id ?? null,
           accountType: resolveAccountType(nextUser),
-          hasSession: Boolean(session),
+          hasValidSession,
+          currentRoute: routeRef.current,
         });
       }
 
       setAuthUser(nextUser);
       setAuthReady(true);
 
+      if (!hasValidSession) {
+        if (source === "getSession") {
+          setAuthFeedback(null);
+        }
+        return;
+      }
+
+      const targetRoute = getRouteForUser(nextUser);
+      if (routeRef.current === "home" || routeRef.current === "signin" || routeRef.current === "signup") {
+        navigate(targetRoute, { replace: true });
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      const nextUser = session?.user ?? null;
+      const hasValidSession = Boolean(session) && Boolean(nextUser);
+      if (!isActive) return;
+
+      if (import.meta.env.DEV) {
+        console.info("[auth] onAuthStateChange", {
+          event,
+          userId: nextUser?.id ?? null,
+          accountType: resolveAccountType(nextUser),
+          hasSession: hasValidSession,
+          currentRoute: routeRef.current,
+        });
+      }
+
       if (event === "SIGNED_OUT") {
+        setAuthUser(null);
+        setAuthReady(true);
         setSignInNotice(false);
         setAuthFeedback(null);
         navigate("home", { replace: true });
         return;
       }
 
-      if ((event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") && nextUser) {
+      if ((event === "SIGNED_IN" || event === "USER_UPDATED" || event === "TOKEN_REFRESHED") && hasValidSession) {
         const targetRoute = getRouteForUser(nextUser);
         const accountType = resolveAccountType(nextUser);
         if (import.meta.env.DEV) {
-          console.info("[auth] session confirmed", { event, accountType, targetRoute, userId: nextUser.id });
+          console.info("[auth] session confirmed", {
+            event,
+            accountType,
+            targetRoute,
+            userId: nextUser.id,
+            currentRoute: routeRef.current,
+          });
         }
+        setAuthUser(nextUser);
+        setAuthReady(true);
         setNeedsEmailConfirmation(false);
         setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting to your dashboard…" });
         setSignInNotice(true);
@@ -428,36 +481,38 @@ function App() {
         signInNoticeTimerRef.current = window.setTimeout(() => setSignInNotice(false), 4500);
         window.clearTimeout(authMessageTimerRef.current);
         authMessageTimerRef.current = window.setTimeout(() => setAuthFeedback(null), 4000);
-        if (targetRoute !== "home") {
+        if (routeRef.current === "home" || routeRef.current === "signin" || routeRef.current === "signup") {
           navigate(targetRoute, { replace: true });
         }
+        return;
       }
+
+      applyAuthState(session, event ?? "session");
     });
 
     supabase.auth.getSession().then(({ data, error }) => {
-      if (!active) return;
+      if (!isActive) return;
       const nextUser = data?.session?.user ?? null;
-      setAuthUser(nextUser);
-      setAuthReady(true);
-
       if (error) {
         if (import.meta.env.DEV) {
           console.error("[auth] getSession error", { message: error.message, code: error.code, status: error.status });
         }
         setAuthFeedback({ type: "error", text: error.message || "We couldn't check your session." });
       }
-
+      applyAuthState(data?.session ?? null, "getSession");
       if (nextUser) {
         const targetRoute = getRouteForUser(nextUser);
         if (import.meta.env.DEV) {
-          console.info("[auth] existing session restored", { accountType: resolveAccountType(nextUser), targetRoute, userId: nextUser.id });
-        }
-        if (route === "home" || route === "signin" || route === "signup") {
-          navigate(targetRoute, { replace: true });
+          console.info("[auth] existing session restored", {
+            accountType: resolveAccountType(nextUser),
+            targetRoute,
+            userId: nextUser.id,
+            currentRoute: routeRef.current,
+          });
         }
       }
     }).catch((error) => {
-      if (!active) return;
+      if (!isActive) return;
       setAuthReady(true);
       if (import.meta.env.DEV) {
         console.error("[auth] getSession failed", { message: error?.message, code: error?.code, status: error?.status });
@@ -466,12 +521,12 @@ function App() {
     });
 
     return () => {
-      active = false;
+      isActive = false;
       subscription.unsubscribe();
       window.clearTimeout(signInNoticeTimerRef.current);
       window.clearTimeout(authMessageTimerRef.current);
     };
-  }, [route]);
+  }, []);
 
   async function handleAuthSubmit(event) {
     event.preventDefault();
@@ -538,20 +593,38 @@ function App() {
             console.error("[auth] signInWithPassword returned no valid session", {
               hasSession: Boolean(nextSession),
               hasUser: Boolean(signedInUser),
+              userId: signedInUser?.id ?? null,
             });
           }
           throw new Error("Authentication did not complete. Please try again.");
         }
 
-        setAuthUser(signedInUser);
+        const { data: refreshedSessionData, error: refreshedSessionError } = await supabase.auth.getSession();
+        const confirmedSession = refreshedSessionData?.session ?? nextSession;
+        const confirmedUser = confirmedSession?.user ?? signedInUser;
+
+        if (!confirmedSession || !confirmedUser || refreshedSessionError) {
+          if (import.meta.env.DEV) {
+            console.error("[auth] signInWithPassword session not confirmed", {
+              hasConfirmedSession: Boolean(confirmedSession),
+              hasConfirmedUser: Boolean(confirmedUser),
+              refreshError: refreshedSessionError?.message ?? null,
+              code: refreshedSessionError?.code ?? null,
+            });
+          }
+          throw new Error("Authentication did not complete. Please try again.");
+        }
+
+        setAuthUser(confirmedUser);
         setAuthReady(true);
         setPassword("");
-        const target = getRouteForUser(signedInUser);
+        const target = getRouteForUser(confirmedUser);
         if (import.meta.env.DEV) {
           console.info("[auth] signInWithPassword successful", {
-            userId: signedInUser.id,
-            accountType: resolveAccountType(signedInUser),
+            userId: confirmedUser.id,
+            accountType: resolveAccountType(confirmedUser),
             targetRoute: target,
+            hasSession: Boolean(confirmedSession),
           });
         }
         setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting…" });
@@ -1102,8 +1175,8 @@ function App() {
 
         {route === "signin" && renderAuthPage("sign-in")}
         {route === "signup" && renderAuthPage("sign-up")}
-        {route === "teen" && (!authReady ? <div className="business-loading"><span className="auth-spinner" aria-hidden="true" /> Loading teen dashboard…</div> : isTeenAccount ? renderTeenDashboard() : <section className="business-access-denied"><h1>Teen dashboard</h1><p>Your account isn’t authorized to view this page.</p><button className="primary-button" type="button" onClick={() => navigate("home", { replace: true })}>Return home</button></section>)}
-        {route === "business" && (!authReady ? <div className="business-loading"><span className="auth-spinner" aria-hidden="true" /> Loading business workspace…</div> : isBusinessAccount ? renderBusinessDashboard() : <section className="business-access-denied"><h1>Business dashboard</h1><p>Sign in with a business account to open this workspace.</p><button className="primary-button" type="button" onClick={() => navigate("signup", { replace: true })}>Create a business account</button></section>)}
+        {route === "teen" && (!authReady ? <div className="business-loading"><span className="auth-spinner" aria-hidden="true" /> Loading teen dashboard…</div> : isTeenAccount ? renderTeenDashboard() : <section className="business-access-denied"><h1>Teen dashboard</h1><p>{authUser ? "This account isn’t configured as a teen account yet. Please contact support or update your account profile settings." : "Your account isn’t authorized to view this page."}</p><button className="primary-button" type="button" onClick={() => navigate("home", { replace: true })}>Return home</button></section>)}
+        {route === "business" && (!authReady ? <div className="business-loading"><span className="auth-spinner" aria-hidden="true" /> Loading business workspace…</div> : isBusinessAccount ? renderBusinessDashboard() : <section className="business-access-denied"><h1>Business dashboard</h1><p>{authUser ? "This account isn’t configured as a business account yet. Please contact support or update your account profile settings." : "Sign in with a business account to open this workspace."}</p><button className="primary-button" type="button" onClick={() => navigate("signup", { replace: true })}>Create a business account</button></section>)}
         {route === "home" && renderHomePage()}
       </main>
 
