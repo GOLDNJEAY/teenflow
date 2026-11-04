@@ -39,6 +39,7 @@ const jobs = [
 ];
 
 const quickFilters = ["All Jobs", "Remote Jobs", "Retail", "Food Service", "Tutoring", "Tech"];
+const APP_REDIRECT_URL = "https://teenflow.org/";
 const milestones = ["First Dollar", "$50 Club", "Century I", "Half Grand", "Grand Achiever", "First Gig"];
 const teenQuotes = [
   { text: "The best way to predict your future is to start building it today.", author: "Abraham Lincoln" },
@@ -127,17 +128,26 @@ function getDailyQuote(quotes, storageKey) {
 
 function getAuthErrorMessage(error) {
   const message = error?.message?.toLowerCase() ?? "";
-  if (error?.code === "invalid_credentials" || message.includes("invalid login credentials")) {
+  if (error?.code === "invalid_credentials" || message.includes("invalid login credentials") || message.includes("invalid credentials")) {
     return "That email and password combination wasn’t recognized. Check them and try again.";
   }
   if (error?.code === "weak_password" || message.includes("password should be at least")) {
     return "Choose a stronger password that meets the password requirements.";
   }
-  if (error?.status === 429) return "Too many attempts. Wait a little and try again.";
+  if (error?.status === 429 || error?.code === "over_email_send_rate_limit" || message.includes("rate limit")) {
+    return "Too many signup or confirmation attempts. Wait a moment and try again, or use the resend confirmation option later.";
+  }
   if (error?.code === "email_not_confirmed" || message.includes("email not confirmed")) {
     return "Please confirm your email address before signing in.";
   }
-  return error?.message || "Authentication failed. Please try again.";
+  if (error?.code === "user_already_exists" || message.includes("user already registered") || message.includes("already exists")) {
+    return "An account with that email already exists. Try signing in or use the resend confirmation option.";
+  }
+  if (error?.code === "email_address_invalid" || message.includes("invalid email")) {
+    return "Please enter a valid email address.";
+  }
+  const fallbackMessage = error?.message || "Authentication failed. Please try again.";
+  return fallbackMessage;
 }
 
 function ArcadeGame({ compact = false }) {
@@ -375,6 +385,15 @@ function App() {
   const isTeenAccount = resolveAccountType(authUser) === "student";
   const isBusinessAccount = resolveAccountType(authUser) === "employer";
 
+  if (import.meta.env.DEV && authUser) {
+    console.info("[auth] user state", {
+      userId: authUser.id,
+      accountType: resolveAccountType(authUser),
+      email: authUser.email,
+      currentRoute: getCurrentRoute(),
+    });
+  }
+
   const teenQuote = useMemo(() => getDailyQuote(teenQuotes, "teen"), []);
   const displayName = authUser?.user_metadata?.first_name || authUser?.user_metadata?.full_name?.trim().split(/\s+/)[0] || "there";
 
@@ -392,14 +411,20 @@ function App() {
   }
 
   useEffect(() => {
-    const syncRoute = () => setRoute(getCurrentRoute());
+    const syncRoute = () => {
+      const nextRoute = getCurrentRoute();
+      if (import.meta.env.DEV) {
+        console.info("[auth] route changed", { nextRoute, userId: authUser?.id ?? null });
+      }
+      setRoute(nextRoute);
+    };
     window.addEventListener("popstate", syncRoute);
     window.addEventListener("hashchange", syncRoute);
     return () => {
       window.removeEventListener("popstate", syncRoute);
       window.removeEventListener("hashchange", syncRoute);
     };
-  }, []);
+  }, [authUser?.id]);
 
   useEffect(() => {
     let isActive = true;
@@ -543,10 +568,24 @@ function App() {
           password,
           options: {
             data: { account_type: accountType },
-            emailRedirectTo: window.location.origin,
+            emailRedirectTo: APP_REDIRECT_URL,
           },
         });
-        if (error) throw error;
+
+        if (import.meta.env.DEV) {
+          console.info("[auth] signUp response", {
+            hasUser: Boolean(data?.user),
+            hasSession: Boolean(data?.session),
+            hasError: Boolean(error),
+            code: error?.code ?? null,
+            status: error?.status ?? null,
+            message: error?.message ?? null,
+          });
+        }
+
+        if (error) {
+          throw error;
+        }
 
         if (data?.session) {
           setPassword("");
@@ -568,6 +607,16 @@ function App() {
           email: email.trim(),
           password,
         });
+
+        if (import.meta.env.DEV) {
+          console.info("[auth] signInWithPassword response", {
+            hasSession: Boolean(data?.session),
+            hasUser: Boolean(data?.user),
+            code: error?.code ?? null,
+            status: error?.status ?? null,
+            message: error?.message ?? null,
+          });
+        }
 
         if (error) {
           if (import.meta.env.DEV) {
@@ -594,43 +643,61 @@ function App() {
               hasSession: Boolean(nextSession),
               hasUser: Boolean(signedInUser),
               userId: signedInUser?.id ?? null,
+              message: data?.message ?? null,
             });
           }
-          throw new Error("Authentication did not complete. Please try again.");
+          throw new Error(getAuthErrorMessage({ message: "Sign in did not return a valid session." }));
         }
 
-        const { data: refreshedSessionData, error: refreshedSessionError } = await supabase.auth.getSession();
-        const confirmedSession = refreshedSessionData?.session ?? nextSession;
-        const confirmedUser = confirmedSession?.user ?? signedInUser;
+        const accountType = resolveAccountType(signedInUser);
+        const target = getRouteForUser(signedInUser);
 
-        if (!confirmedSession || !confirmedUser || refreshedSessionError) {
-          if (import.meta.env.DEV) {
-            console.error("[auth] signInWithPassword session not confirmed", {
-              hasConfirmedSession: Boolean(confirmedSession),
-              hasConfirmedUser: Boolean(confirmedUser),
-              refreshError: refreshedSessionError?.message ?? null,
-              code: refreshedSessionError?.code ?? null,
-            });
-          }
-          throw new Error("Authentication did not complete. Please try again.");
-        }
-
-        setAuthUser(confirmedUser);
-        setAuthReady(true);
-        setPassword("");
-        const target = getRouteForUser(confirmedUser);
         if (import.meta.env.DEV) {
-          console.info("[auth] signInWithPassword successful", {
-            userId: confirmedUser.id,
-            accountType: resolveAccountType(confirmedUser),
+          console.info("[auth] post-login session check", {
+            userId: signedInUser.id,
+            hasSession: Boolean(nextSession),
+            accountType,
             targetRoute: target,
-            hasSession: Boolean(confirmedSession),
+            currentRoute: getCurrentRoute(),
           });
         }
+
+        setAuthUser(signedInUser);
+        setAuthReady(true);
+        setPassword("");
         setAuthFeedback({ type: "success", text: "Authentication succeeded. Redirecting…" });
-        navigate(target, { replace: true });
+
+        if (import.meta.env.DEV) {
+          console.info("[auth] navigation attempt", {
+            target,
+            currentRoute: getCurrentRoute(),
+            accountType,
+            userId: signedInUser.id,
+          });
+        }
+
+        try {
+          navigate(target, { replace: true });
+        } catch (navigationError) {
+          if (import.meta.env.DEV) {
+            console.error("[auth] navigation failed after successful login", {
+              message: navigationError?.message ?? null,
+              target,
+              userId: signedInUser.id,
+            });
+          }
+          throw navigationError;
+        }
       }
     } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error("[auth] auth submit error", {
+          code: error?.code ?? null,
+          status: error?.status ?? null,
+          message: error?.message ?? null,
+          authMode,
+        });
+      }
       setAuthFeedback({ type: "error", text: getAuthErrorMessage(error) });
     } finally {
       setAuthBusy(false);
@@ -644,7 +711,16 @@ function App() {
     setAuthFeedback(null);
     try {
       const { error } = await supabase.auth.resend({ type: "signup", email: email.trim() });
-      if (error) throw error;
+      if (error) {
+        if (import.meta.env.DEV) {
+          console.error("[auth] resend confirmation failed", {
+            code: error?.code ?? null,
+            status: error?.status ?? null,
+            message: error?.message ?? null,
+          });
+        }
+        throw error;
+      }
       setAuthFeedback({ type: "success", text: "Confirmation email sent. Check your inbox." });
       setNeedsEmailConfirmation(false);
     } catch (error) {
